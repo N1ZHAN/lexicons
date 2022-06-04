@@ -1,0 +1,68 @@
+def get_error_type(pred, label):
+    # return the type of error: tp,fp,tn,fn
+    if pred !=label and pred==0 and label==1:
+        return "fn"
+    elif pred !=label and pred==1 and label==0:
+        return "fp"
+    elif pred==label and pred==0 and label==0:
+        return "tn"
+    else:
+        return "tp"
+
+import re
+import nltk
+from nltk.corpus import stopwords
+from nltk.tokenize import RegexpTokenizer
+from nltk.stem import PorterStemmer
+from nltk.stem import WordNetLemmatizer
+
+def classify(text, inqtabs_dict, swn_dict): 
+    text1 = re.sub('[^a-zA-Z]', ' ', text) #remove all irrelevant characters
+    text2 = re.sub(r'(https?://\S+)', ' ', text1) #remove URL
+    tokenizer = RegexpTokenizer(r'\w+')
+    words = tokenizer.tokenize(text2) #tokenization
+    stop_words = set(stopwords.words('english'))
+    stop_words.update(["looking","catch","point","all","close","even","make","main","mind"]) # remove stopwords 
+
+    
+    positive_words_inqtabs = []
+    negative_words_inqtabs = []
+    words_matched_inqtabs = []
+
+    positive_words_swn = {}
+    negative_words_swn = {}
+    words_matched_swn = []
+
+    for word in words:
+        if word not in stop_words:
+            word = word.lower()
+            if word in inqtabs_dict:
+                if inqtabs_dict[word] == '1':
+                     positive_words_inqtabs.append(word)
+                else:
+                     negative_words_inqtabs.append(word)
+                words_matched_inqtabs.append(word)
+            if word in swn_dict:
+                positive_words_swn[word] = swn_dict[word][0]
+                negative_words_swn[word] = swn_dict[word][1]
+                words_matched_swn.append(word)
+
+    if (len(positive_words_inqtabs) > len(negative_words_inqtabs)) & (sum(positive_words_swn.values()) > sum(negative_words_swn.values())):
+        score = 1
+    else:
+        score = 0
+    return score
+    
+    
+    
+filedir = '../data'
+output_file_name = '../output/test.csv'
+print("Reading data...")
+data = get_training_data(filedir)
+lexicon_dir = os.path.join(filedir, 'lexicon')
+inqtabs_dict = read_inqtabs(os.path.join(lexicon_dir, 'inqtabs.txt'))
+swn_dict = read_senti_word_net(os.path.join(lexicon_dir, 'SentiWordNet_3.0.0_20130122.txt'))
+print("Classifying...")
+get_training_accuracy(data, inqtabs_dict, swn_dict)
+print("Writing output...")
+write_predictions(filedir, inqtabs_dict, swn_dict, output_file_name)
