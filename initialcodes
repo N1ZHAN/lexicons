@@ -1,0 +1,113 @@
+import os
+import csv
+import sys
+from tqdm.notebook import tqdm
+
+POS_LABEL = '1'
+NEG_LABEL = '0'
+
+
+def check_if_exist(file_path):
+    if not os.path.exists(file_path):
+        print(file_path + ' could not be found')
+        return False
+    return True
+
+
+def extract_word(word):
+    return word.lower() if word.find('#') < 0 else word[:word.find('#')].lower()
+
+
+def read_inqtabs(input_file_path):
+    """
+    :param input_file_path:
+    :return lexicons: dictionary of labels (e.g. lexicons['good']: 1, lexicons['bad']: 0)
+    """
+    if not check_if_exist(input_file_path):
+        return
+
+    lexicons = dict()
+    with open(input_file_path, 'r', encoding='utf-8') as fp:
+        for line in fp.readlines():
+            elements = line.strip().split('\t')
+            word = extract_word(elements[0])
+            if len(word) > 0 and (elements[2] == 'Positiv' or elements[3] == 'Negativ'):
+                label = POS_LABEL if elements[2] == 'Positiv' else NEG_LABEL
+                lexicons[word] = label
+    return lexicons
+
+
+def read_senti_word_net(input_file_path):
+    """
+    :param input_file_path:
+    :return lexicon: dictionary of lists (e.g. lexicons['good'][0]: positive score, lexicons['bad'][1]: negative score)
+    """
+    if not check_if_exist(input_file_path):
+        return
+
+    all_lexicons = dict()
+    with open(input_file_path, 'r', encoding='utf-8') as fp:
+        for line in fp.readlines():
+            if line.startswith('#'):
+                continue
+
+            elements = line.strip().split('\t')
+            if len(elements) < 5 or len(elements[4]) == 0:
+                continue
+
+            for tmp_word in elements[4].split(' '):
+                word = extract_word(tmp_word).replace('_', ' ')
+                if len(word) > 0 and len(elements[2]) > 0 and len(elements[3]) > 0:
+                    if word not in all_lexicons.keys():
+                        all_lexicons[word] = list()
+                        all_lexicons[word].append(list())
+                        all_lexicons[word].append(list())
+                    all_lexicons[word][0].append(float(elements[2]))
+                    all_lexicons[word][1].append(float(elements[3]))
+
+    lexicons = dict()
+    for word in all_lexicons.keys():
+        lexicons[word] = (max(all_lexicons[word][0]), max(all_lexicons[word][1]))
+    return lexicons
+
+
+def get_training_data(filedir):
+    with open(os.path.join(filedir, 'train.csv'), encoding='utf-8') as csvfile:
+        training_data = [row for row in csv.DictReader(csvfile, delimiter=',')]
+        for entry in training_data:
+            with open(os.path.join(filedir, 'train', entry['FileIndex'] + '.txt'), encoding='utf-8') as reviewfile:
+                entry['Review'] = reviewfile.read()
+    return training_data
+
+
+def get_training_accuracy(data, inqtabs_dict, swn_dict):
+    num_correct = 0
+    etype_files = {}
+    for etype in ["fp", "fn", "tp", "tn"]:
+        etype_files[etype] = open('../output/'+ etype + '.txt', 'w+', encoding='utf-8')
+    for row in data:
+        sentiment_prediction = classify(row['Review'], inqtabs_dict, swn_dict)
+        sentiment_label = int(row['Category'])
+        if sentiment_prediction == sentiment_label:
+            num_correct += 1
+        etype = get_error_type(sentiment_prediction, sentiment_label)
+        etype_files[etype].write("%s\t%s\n"%(row['FileIndex'], row['Review']))
+    accuracy = num_correct * 1.0 / len(data)
+    for etype in ["fp", "fn", "tp", "tn"]:
+        etype_files[etype].close()
+    print("Accuracy: " + str(accuracy))
+    return accuracy
+
+
+def write_predictions(filedir, inqtabs_dict, swn_dict, output_file_name):
+    testfiledir = os.path.join(filedir, 'test')
+    with open(output_file_name, 'w+', encoding='utf-8') as csvfile:
+        writer = csv.DictWriter(csvfile, delimiter=',', fieldnames=['FileIndex', 'Category'])
+        writer.writeheader()
+        for filename in tqdm(sorted(os.listdir(testfiledir), key=lambda x: int(os.path.splitext(x)[0]))):
+            with open(os.path.join(testfiledir, filename), encoding='utf-8') as reviewfile:
+                review = reviewfile.read()
+                prediction = dict()
+                prediction['FileIndex'] = os.path.splitext(filename)[0]
+                prediction['Category'] = classify(review, inqtabs_dict, swn_dict)
+                writer.writerow(prediction)
